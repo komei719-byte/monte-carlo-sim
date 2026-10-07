@@ -7,15 +7,17 @@ const runBtn = document.getElementById('runBtn');
 
 let chartInstance = null;
 
-// 配分比率の自動連動
+// 配分比率の自動連動 (0%～100%のクランプ処理を追加)
 weightAInput.addEventListener('input', () => {
-    let valA = parseFloat(weightAInput.value) || 0;
+    let valA = parseFloat(weightAInput.value);
+    if (isNaN(valA)) valA = 0;
     if (valA < 0) valA = 0;
     if (valA > 100) valA = 100;
+    weightAInput.value = valA;
     weightBInput.value = (100 - valA).toFixed(0);
 });
 
-// CASH判定時のパラメータ入力自動無効化（オプション）
+// CASH判定時のボラティリティリセット
 isCashAInput.addEventListener('change', (e) => {
     if (e.target.checked) {
         document.getElementById('volA').value = 0;
@@ -39,7 +41,7 @@ function generateStandardNormal() {
 function generateCorrelatedNormals(rho) {
     const z1 = generateStandardNormal();
     const z2 = generateStandardNormal();
-    const zB = rho * z1 + Math.sqrt(1 - rho * rho) * z2;
+    const zB = rho * z1 + Math.sqrt(Math.max(0, 1 - rho * rho)) * z2;
     return [z1, zB];
 }
 
@@ -47,66 +49,80 @@ function generateCorrelatedNormals(rho) {
 function runSinglePath(params) {
     const { muA, sigmaA, wA, isCashA, muB, sigmaB, wB, isCashB, rho, taxRate, initialCapital, years } = params;
     
-    // 初期設定
+    // 初期評価額
     let valA = initialCapital * (wA / 100);
     let valB = initialCapital * (wB / 100);
     
-    // 取得簿価（初期）
+    // 取得簿価（初期コスト）
     let costA = valA;
     let costB = valB;
 
     const path = [initialCapital];
 
-    const skipRebalance = (wA === 100 || wB === 100);
+    // 配分100%時のスキップ判定 (どちらかが100%ならリバランス・課税を一切行わない)
+    const skipRebalance = (wA >= 100 || wB >= 100 || wA <= 0 || wB <= 0);
 
     for (let y = 1; y <= years; y++) {
         // 1. 幾何ブラウン運動による1年間の資産変動
         const [zA, zB] = generateCorrelatedNormals(rho);
         
-        // 連続複利調整込みの成長率
         const driftA = muA - 0.5 * sigmaA * sigmaA;
         const driftB = muB - 0.5 * sigmaB * sigmaB;
 
         valA = valA * Math.exp(driftA + sigmaA * zA);
         valB = valB * Math.exp(driftB + sigmaB * zB);
 
-        // 2. 年1回のリバランス＆課税処理 (100%単一配分の場合はスキップ)
+        // 2. 年1回のリバランス＆譲渡所得課税処理
         if (!skipRebalance) {
             const totalVal = valA + valB;
             const targetValA = totalVal * (wA / 100);
             const targetValB = totalVal * (wB / 100);
 
             if (valA > targetValA) {
-                // 資産Aの一部を売却 -> 資産Bを買い増し
+                // 【資産Aの売却 -> 資産Bの買い増し】
                 const sellValA = valA - targetValA;
-                const gainRatioA = valA > 0 ? Math.max(0, (valA - costA) / valA) : 0;
-                const realizedGainA = isCashA ? 0 : sellValA * gainRatioA;
-                const tax = realizedGainA * taxRate;
 
-                // 簿価減額と売却処理
-                costA -= sellValA * (1 - gainRatioA);
+                // 資産Aの含み益（実現益）と税金の計算
+                let tax = 0;
+                if (!isCashA && valA > 0) {
+                    const gainRatioA = Math.max(0, (valA - costA) / valA); // 売却額に含まれる含み益割合
+                    const realizedGainA = sellValA * gainRatioA;
+                    tax = realizedGainA * taxRate;
+                }
+
+                // 資産Aの簿価減額（売却割合に応じて減額）
+                if (valA > 0) {
+                    costA -= (sellValA / valA) * costA;
+                }
                 valA -= sellValA;
 
-                // 税金を引いた残額で資産Bを購入
+                // 税金を差し引いた手残り資金で資産Bを購入
                 const buyValB = sellValA - tax;
                 valB += buyValB;
-                costB += buyValB;
+                costB += buyValB; // 資産Bの簿価加算
 
             } else if (valB > targetValB) {
-                // 資産Bの一部を売却 -> 資産Aを買い増し
+                // 【資産Bの売却 -> 資産Aの買い増し】
                 const sellValB = valB - targetValB;
-                const gainRatioB = valB > 0 ? Math.max(0, (valB - costB) / valB) : 0;
-                const realizedGainB = isCashB ? 0 : sellValB * gainRatioB;
-                const tax = realizedGainB * taxRate;
 
-                // 簿価減額と売却処理
-                costB -= sellValB * (1 - gainRatioB);
+                // 資産Bの含み益（実現益）と税金の計算
+                let tax = 0;
+                if (!isCashB && valB > 0) {
+                    const gainRatioB = Math.max(0, (valB - costB) / valB); // 売却額に含まれる含み益割合
+                    const realizedGainB = sellValB * gainRatioB;
+                    tax = realizedGainB * taxRate;
+                }
+
+                // 資産Bの簿価減額（売却割合に応じて減額）
+                if (valB > 0) {
+                    costB -= (sellValB / valB) * costB;
+                }
                 valB -= sellValB;
 
-                // 税金を引いた残額で資産Aを購入
+                // 税金を差し引いた手残り資金で資産Aを購入
                 const buyValA = sellValB - tax;
                 valA += buyValA;
-                costA += buyValA;
+                costA += buyValA; // 資産Aの簿価加算
             }
         }
 
@@ -167,7 +183,7 @@ function updateChart(paths, years) {
     const ctx = document.getElementById('simChart').getContext('2d');
     const labels = Array.from({ length: years + 1 }, (_, i) => `${i}年目`);
 
-    // 全パスのデータセット構築 (半透明表示)
+    // 全パスのデータセット構築
     const datasets = paths.map((path) => ({
         data: path,
         borderColor: 'rgba(99, 102, 241, 0.15)',
