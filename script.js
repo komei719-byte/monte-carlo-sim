@@ -7,7 +7,7 @@ const runBtn = document.getElementById('runBtn');
 
 let chartInstance = null;
 
-// 配分比率の自動連動 (0%～100%のクランプ処理を追加)
+// 配分比率の自動連動
 weightAInput.addEventListener('input', () => {
     let valA = parseFloat(weightAInput.value);
     if (isNaN(valA)) valA = 0;
@@ -45,21 +45,22 @@ function generateCorrelatedNormals(rho) {
     return [z1, zB];
 }
 
-// 単一パスのシミュレーション実行
+// 単一パスのシミュレーション実行 (最大ドローダウン算出対応)
 function runSinglePath(params) {
     const { muA, sigmaA, wA, isCashA, muB, sigmaB, wB, isCashB, rho, taxRate, initialCapital, years } = params;
     
-    // 初期評価額
     let valA = initialCapital * (wA / 100);
     let valB = initialCapital * (wB / 100);
     
-    // 取得簿価（初期コスト）
     let costA = valA;
     let costB = valB;
 
     const path = [initialCapital];
 
-    // 配分100%時のスキップ判定 (どちらかが100%ならリバランス・課税を一切行わない)
+    // ドローダウン追跡用変数
+    let peakVal = initialCapital;
+    let maxDrawdown = 0; // 正の割合 (例: 0.35 = 35%減)
+
     const skipRebalance = (wA >= 100 || wB >= 100 || wA <= 0 || wB <= 0);
 
     for (let y = 1; y <= years; y++) {
@@ -79,57 +80,52 @@ function runSinglePath(params) {
             const targetValB = totalVal * (wB / 100);
 
             if (valA > targetValA) {
-                // 【資産Aの売却 -> 資産Bの買い増し】
                 const sellValA = valA - targetValA;
-
-                // 資産Aの含み益（実現益）と税金の計算
                 let tax = 0;
                 if (!isCashA && valA > 0) {
-                    const gainRatioA = Math.max(0, (valA - costA) / valA); // 売却額に含まれる含み益割合
-                    const realizedGainA = sellValA * gainRatioA;
-                    tax = realizedGainA * taxRate;
+                    const gainRatioA = Math.max(0, (valA - costA) / valA);
+                    tax = (sellValA * gainRatioA) * taxRate;
                 }
 
-                // 資産Aの簿価減額（売却割合に応じて減額）
-                if (valA > 0) {
-                    costA -= (sellValA / valA) * costA;
-                }
+                if (valA > 0) costA -= (sellValA / valA) * costA;
                 valA -= sellValA;
 
-                // 税金を差し引いた手残り資金で資産Bを購入
                 const buyValB = sellValA - tax;
                 valB += buyValB;
-                costB += buyValB; // 資産Bの簿価加算
+                costB += buyValB;
 
             } else if (valB > targetValB) {
-                // 【資産Bの売却 -> 資産Aの買い増し】
                 const sellValB = valB - targetValB;
-
-                // 資産Bの含み益（実現益）と税金の計算
                 let tax = 0;
                 if (!isCashB && valB > 0) {
-                    const gainRatioB = Math.max(0, (valB - costB) / valB); // 売却額に含まれる含み益割合
-                    const realizedGainB = sellValB * gainRatioB;
-                    tax = realizedGainB * taxRate;
+                    const gainRatioB = Math.max(0, (valB - costB) / valB);
+                    tax = (sellValB * gainRatioB) * taxRate;
                 }
 
-                // 資産Bの簿価減額（売却割合に応じて減額）
-                if (valB > 0) {
-                    costB -= (sellValB / valB) * costB;
-                }
+                if (valB > 0) costB -= (sellValB / valB) * costB;
                 valB -= sellValB;
 
-                // 税金を差し引いた手残り資金で資産Aを購入
                 const buyValA = sellValB - tax;
                 valA += buyValA;
-                costA += buyValA; // 資産Aの簿価加算
+                costA += buyValA;
             }
         }
 
-        path.push(valA + valB);
+        const currentTotal = valA + valB;
+        path.push(currentTotal);
+
+        // 最大ドローダウン（Peak to Trough）の更新
+        if (currentTotal > peakVal) {
+            peakVal = currentTotal;
+        } else {
+            const dd = (peakVal - currentTotal) / peakVal;
+            if (dd > maxDrawdown) {
+                maxDrawdown = dd;
+            }
+        }
     }
 
-    return path;
+    return { path, maxDrawdown };
 }
 
 // メイン計算処理
@@ -153,11 +149,15 @@ function simulate() {
     };
 
     const allPaths = [];
+    const maxDDs = [];
+
     for (let i = 0; i < params.simulations; i++) {
-        allPaths.push(runSinglePath(params));
+        const res = runSinglePath(params);
+        allPaths.push(res.path);
+        maxDDs.push(res.maxDrawdown);
     }
 
-    // 統計計算 (最終年の試行結果を取得)
+    // --- 1. 資産額の統計（最終年） ---
     const finalValues = allPaths.map(p => p[p.length - 1]).sort((a, b) => a - b);
     
     const getPercentile = (arr, p) => {
@@ -169,10 +169,31 @@ function simulate() {
     const median = getPercentile(finalValues, 0.50);
     const p90 = getPercentile(finalValues, 0.90);
 
-    // UI更新
+    // 元本割れ確率
+    const lossCount = finalValues.filter(v => v < params.initialCapital).length;
+    const lossProbability = (lossCount / params.simulations) * 100;
+
+    // --- 2. ドローダウン（最大下落率）の統計 ---
+    const sortedDDs = [...maxDDs].sort((a, b) => a - b);
+    const medianDD = getPercentile(sortedDDs, 0.50) * 100;
+
+    // 最大DD 50%以上 / 70%以上の確率
+    const dd50Count = maxDDs.filter(dd => dd >= 0.50).length;
+    const probDD50 = (dd50Count / params.simulations) * 100;
+
+    const dd70Count = maxDDs.filter(dd => dd >= 0.70).length;
+    const probDD70 = (dd70Count / params.simulations) * 100;
+
+    // --- UI更新 ---
     document.getElementById('statP10').innerText = `${p10.toLocaleString('ja-JP', { maximumFractionDigits: 1 })} 万円`;
     document.getElementById('statMedian').innerText = `${median.toLocaleString('ja-JP', { maximumFractionDigits: 1 })} 万円`;
     document.getElementById('statP90').innerText = `${p90.toLocaleString('ja-JP', { maximumFractionDigits: 1 })} 万円`;
+
+    // 追加項目の表示更新
+    document.getElementById('statLossProb').innerText = `${lossProbability.toFixed(1)} %`;
+    document.getElementById('statMedianDD').innerText = `-${medianDD.toFixed(1)} %`;
+    document.getElementById('statProbDD50').innerText = `${probDD50.toFixed(1)} %`;
+    document.getElementById('statProbDD70').innerText = `${probDD70.toFixed(1)} %`;
 
     // グラフ更新
     updateChart(allPaths, params.years);
@@ -183,7 +204,6 @@ function updateChart(paths, years) {
     const ctx = document.getElementById('simChart').getContext('2d');
     const labels = Array.from({ length: years + 1 }, (_, i) => `${i}年目`);
 
-    // 全パスのデータセット構築
     const datasets = paths.map((path) => ({
         data: path,
         borderColor: 'rgba(99, 102, 241, 0.15)',
@@ -215,9 +235,7 @@ function updateChart(paths, years) {
                 }
             },
             scales: {
-                x: {
-                    grid: { color: 'rgba(0,0,0,0.05)' }
-                },
+                x: { grid: { color: 'rgba(0,0,0,0.05)' } },
                 y: {
                     title: { display: true, text: '資産評価額 (万円)' },
                     grid: { color: 'rgba(0,0,0,0.05)' }

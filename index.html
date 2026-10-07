@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>2資産 モンテカルロ・シミュレーター</title>
-    <!-- Tailwind CSS (デザイン用) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Chart.js (グラフ描画用) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 p-4 md:p-8">
@@ -36,11 +34,11 @@
                     <div class="grid grid-cols-2 gap-2 text-sm">
                         <div>
                             <label class="block text-slate-600 text-xs">リターン (%)</label>
-                            <input type="number" id="returnA" value="5.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
+                            <input type="number" id="returnA" value="35.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
                         </div>
                         <div>
                             <label class="block text-slate-600 text-xs">ボラティリティ (%)</label>
-                            <input type="number" id="volA" value="15.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
+                            <input type="number" id="volA" value="75.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
                         </div>
                     </div>
                     <div>
@@ -54,18 +52,18 @@
                     <h2 class="font-bold text-slate-700 flex justify-between items-center">
                         資産 B
                         <label class="text-xs text-slate-500 flex items-center gap-1 cursor-pointer">
-                            <input type="checkbox" id="isCashB" class="rounded border-slate-300 text-indigo-600">
+                            <input type="checkbox" id="isCashB" class="rounded border-slate-300 text-indigo-600" checked>
                             CASH (非課税)
                         </label>
                     </h2>
                     <div class="grid grid-cols-2 gap-2 text-sm">
                         <div>
                             <label class="block text-slate-600 text-xs">リターン (%)</label>
-                            <input type="number" id="returnB" value="1.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
+                            <input type="number" id="returnB" value="0.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
                         </div>
                         <div>
                             <label class="block text-slate-600 text-xs">ボラティリティ (%)</label>
-                            <input type="number" id="volB" value="5.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
+                            <input type="number" id="volB" value="0.0" step="0.1" class="w-full mt-1 border rounded px-2 py-1">
                         </div>
                     </div>
                     <div>
@@ -78,7 +76,7 @@
                 <div class="space-y-3 text-sm">
                     <div>
                         <label class="block text-slate-600 text-xs">相関係数 (-1.0 ～ +1.0)</label>
-                        <input type="number" id="correlation" value="0.2" step="0.05" min="-1" max="1" class="w-full mt-1 border rounded px-2 py-1">
+                        <input type="number" id="correlation" value="0.0" step="0.05" min="-1" max="1" class="w-full mt-1 border rounded px-2 py-1">
                     </div>
                     <div>
                         <label class="block text-slate-600 text-xs">譲渡所得税率 (%)</label>
@@ -96,7 +94,7 @@
                     </div>
                     <div>
                         <label class="block text-slate-600 text-xs">シミュレーション描画数 (パス)</label>
-                        <input type="number" id="simulations" value="100" min="10" max="1000" class="w-full mt-1 border rounded px-2 py-1">
+                        <input type="number" id="simulations" value="500" min="10" max="2000" class="w-full mt-1 border rounded px-2 py-1">
                     </div>
                 </div>
 
@@ -107,25 +105,42 @@
 
             <!-- 結果表示・グラフエリア -->
             <div class="lg:col-span-2 space-y-6">
-                <!-- 統計カード -->
-                <div class="grid grid-cols-3 gap-4">
-                    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
+                <!-- 統計カードエリア (資産額 & リスク指標) -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
                         <div class="text-xs text-slate-500">上位 10% (好調)</div>
-                        <div id="statP90" class="text-lg md:text-xl font-bold text-emerald-600 mt-1">-</div>
+                        <div id="statP90" class="text-base font-bold text-emerald-600 mt-0.5">-</div>
                     </div>
-                    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
                         <div class="text-xs text-slate-500">中央値 (標準)</div>
-                        <div id="statMedian" class="text-lg md:text-xl font-bold text-slate-800 mt-1">-</div>
+                        <div id="statMedian" class="text-base font-bold text-slate-800 mt-0.5">-</div>
                     </div>
-                    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm text-center">
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
                         <div class="text-xs text-slate-500">下位 10% (不調)</div>
-                        <div id="statP10" class="text-lg md:text-xl font-bold text-rose-600 mt-1">-</div>
+                        <div id="statP10" class="text-base font-bold text-rose-600 mt-0.5">-</div>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+                        <div class="text-xs text-slate-500">元本割れ確率</div>
+                        <div id="statLossProb" class="text-base font-bold text-amber-600 mt-0.5">-</div>
+                    </div>
+
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+                        <div class="text-xs text-slate-500">最大DD (中央値)</div>
+                        <div id="statMedianDD" class="text-base font-bold text-purple-600 mt-0.5">-</div>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center">
+                        <div class="text-xs text-slate-500">最大DD 50%以上確率</div>
+                        <div id="statProbDD50" class="text-base font-bold text-rose-700 mt-0.5">-</div>
+                    </div>
+                    <div class="bg-white p-3 rounded-xl border border-slate-200 shadow-sm text-center col-span-2 sm:col-span-2">
+                        <div class="text-xs text-slate-500">最大DD 70%以上確率</div>
+                        <div id="statProbDD70" class="text-base font-bold text-red-800 mt-0.5">-</div>
                     </div>
                 </div>
 
                 <!-- グラフ描画カード -->
                 <div class="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                    <h2 class="font-bold text-slate-800 mb-4">資産推移 (対数・実数切り替え対応)</h2>
+                    <h2 class="font-bold text-slate-800 mb-4">資産推移 (対数・実数対応)</h2>
                     <div class="relative h-96">
                         <canvas id="simChart"></canvas>
                     </div>
